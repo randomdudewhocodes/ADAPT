@@ -1602,8 +1602,8 @@ private:
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
 
-        VkImageView storageImageView;
-        if (vkCreateImageView(device, &viewInfo, nullptr, &storageImageView) != VK_SUCCESS) {
+        if (vkCreateImageView(device, &viewInfo, nullptr, &storageImageView) != VK_SUCCESS)
+        {
             throw std::runtime_error("failed to create texture image view!");
         }
     }
