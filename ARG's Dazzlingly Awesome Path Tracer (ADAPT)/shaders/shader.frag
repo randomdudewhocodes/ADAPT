@@ -1,10 +1,12 @@
 #version 460
 
-layout(location = 0) in vec2 I;
+layout(binding = 1) uniform sampler2D texSampler;
+
+layout(location = 0) in vec2 uv;
 
 layout(location = 0) out vec4 O;
 
 void main()
 {
-    O = vec4(I, 0, 1);
+    O = texture(texSampler, uv);
 }
