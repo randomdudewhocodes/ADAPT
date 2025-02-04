@@ -89,7 +89,7 @@ void main()
 
     ray r = ray(vec3(0), normalize(vec3(uv, -1)));
 
-    vec4 color = vec4(color(r), 1);
+    vec4 color = vec4(deNaN(color(r)), 1);
 
     imageStore(storageImage, I, color + previous);
 }
