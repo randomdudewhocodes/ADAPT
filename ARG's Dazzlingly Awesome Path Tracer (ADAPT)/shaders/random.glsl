@@ -35,10 +35,17 @@ vec2 randOnUnitCircle()
     return vec2(cos(a), sin(a));
 }
 
+vec2 randInUnitCircle()
+{
+    vec2 r = rand2();
+    r.y *= TAU;
+    return sqrt(r.x) * vec2(cos(r.y), sin(r.y));
+}
+
 vec3 randOnUnitSphere()
 {
     vec2 r = rand2();
-    r.x *= TAU;
-    r.y = 2 * r.y - 1;
-	return vec3(sqrt(1. - r.y * r.y) * vec2(cos(r.x), sin(r.x)), r.y);
+    r.x = 2 * r.x - 1;
+    r.y *= TAU;
+	return vec3(sqrt(1. - r.x * r.x) * vec2(cos(r.y), sin(r.y)), r.x);
 }

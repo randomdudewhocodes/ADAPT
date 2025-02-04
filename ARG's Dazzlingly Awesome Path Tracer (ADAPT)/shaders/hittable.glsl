@@ -1,7 +1,26 @@
+struct material
+{
+    vec3 baseColor, emission;
+    
+    float anisotropic,
+          metallic,
+          roughness,
+          subsurface,
+          specularTint,
+          sheen,
+          sheenTint,
+          clearcoat,
+          clearcoatRoughness,
+          specTrans,
+          IOR, ax, ay;
+};
+
 struct hitRecord
 {
     float t;
     vec3 p, normal;
+    material mat;
+    float eta;
 };
 
 bool hitSphere(vec3 center, float radius, ray r, float tmin, float tmax, inout hitRecord rec)

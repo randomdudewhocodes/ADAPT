@@ -7,9 +7,6 @@ layout(binding = 1, rgba32f) uniform image2D storageImage;
 ivec2 resolution = imageSize(storageImage);
 
 #include "common.glsl"
-#include "ray.glsl"
-#include "hittable.glsl"
-#include "random.glsl"
 
 bool worldHit(ray r, float tmin, float tmax, out hitRecord rec)
 {
@@ -20,40 +17,63 @@ bool worldHit(ray r, float tmin, float tmax, out hitRecord rec)
     if(hitSphere(vec3(0, 0, -1), .5, r, tmin, rec.t, rec))
     {
         hit = true;
+        rec.mat = METAL(vec3(.7, .6, .5), 0.);
     }
 
     if(hitSphere(vec3(0, -100.5, -1), 100, r, tmin, rec.t, rec))
     {
         hit = true;
+        rec.mat = DIFFUSE(vec3(.5), 1.);
     }
 
     return hit;
 }
 
+vec3 skyTexture(vec3 rd)
+{
+    float a = .5 * (rd.y + 1);
+    return mix(vec3(1), vec3(.5, .7, 1), a);
+}
+
 vec3 color(ray r)
 {
-    vec3 col = vec3(1);  
+    vec3 col = vec3(1), emitted = vec3(0);
+    float pdf;
 	hitRecord rec;
     
     for (int i = 0; i < 10; i++)
     {
-    	if (worldHit(r, .001, 1e20, rec))
+        if (worldHit(r, .01, 1e5, rec))
         {
-        	vec3 rd = normalize(rec.normal + randOnUnitSphere());
-            col *= .5;
-
-            r.o = rec.p;
-            r.d = rd;
-	    }
+            emitted += col * rec.mat.emission;
+            
+            if(dot(rec.normal, r.d) > 0.) rec.eta = rec.mat.IOR, rec.normal = -rec.normal;
+            else rec.eta = 1. / rec.mat.IOR;
+            
+            ray scattered;
+            scattered.o = rec.p;
+            
+            vec3 BSDF = DisneySample(rec, -r.d, scattered.d, pdf);
+            if(pdf > 0.) col *= BSDF / pdf;
+            else break;
+            
+            r = scattered;
+            
+            #ifdef RUSSIAN_ROULETE
+            float p = 1. - 1. / luma(col + 1.);
+        	if (rand > p) break;
+            col /= p;
+            #endif
+        }
+        
         else
         {
-            float a = .5 * (r.d.y + 1);
-            col *= mix(vec3(1), vec3(.5, .7, 1), a);
-            return col;
+            emitted += col * skyTexture(r.d);
+            break;
     	}
     }
-
-    return col;
+    
+    return emitted;
 }
 
 
