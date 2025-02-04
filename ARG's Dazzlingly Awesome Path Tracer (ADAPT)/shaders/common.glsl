@@ -4,3 +4,4 @@
 #include "random.glsl"
 #include "sampling.glsl"
 #include "disney.glsl"
+#include "camera.glsl"

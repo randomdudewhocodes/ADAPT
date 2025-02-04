@@ -1192,7 +1192,7 @@ private:
                 
                 col = col < .0031308 ? 12.92 * col : 1.055 * pow(col, 1 / 2.4) - .055;
 
-                image[i] = unsigned char(255.999 * col);
+                image[i] = unsigned char(255.999 * std::clamp(col, 0.f, 1.f));
             }
 
             stbi_flip_vertically_on_write(1);

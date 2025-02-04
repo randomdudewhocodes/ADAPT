@@ -29,6 +29,16 @@ uvec4 urand4()
 #define rand3() rand4().xyz
 #define rand4() (vec4(urand4()) / 4294967296.)
 
+uvec4 uhash4(vec4 p)  { return pcg4d(floatBitsToUint(p)); }
+uvec4 uhash4(float v) { return uhash4(vec4(v)); }
+uvec4 uhash4(vec2 v)  { return uhash4(v.xyxy); }
+uvec4 uhash4(vec3 v)  { return uhash4(v.xyzx); }
+
+#define hash(v)  hash4(v).x
+#define hash2(v) hash4(v).xy
+#define hash3(v) hash4(v).xyz
+#define hash4(v) (vec4(uhash4(v)) / 4294967296.)
+
 vec2 randOnUnitCircle()
 {
     float a = TAU * rand();
