@@ -39,7 +39,7 @@ vec3 color(ray r)
     {
     	if (worldHit(r, .001, 1e20, rec))
         {
-        	vec3 rd = normalize(rec.normal + randUnitSphere());
+        	vec3 rd = normalize(rec.normal + randOnUnitSphere());
             col *= .5;
 
             r.o = rec.p;
