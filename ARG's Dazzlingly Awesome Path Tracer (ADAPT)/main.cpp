@@ -1170,41 +1170,27 @@ private:
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
-        if (glfwGetKey(this->window, GLFW_KEY_P) == GLFW_PRESS)
+        if (glfwGetKey(this->window, GLFW_KEY_S) == GLFW_PRESS)
         {
             glfwWaitEventsTimeout(0.7);
 
-            transitionImageLayout(storageImage, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-            copyImageToBuffer(renderedImageBuffer, storageImage, WIDTH, HEIGHT);
+            transitionImageLayout(swapChainImages[currentFrame], VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+            copyImageToBuffer(renderedImageBuffer, swapChainImages[currentFrame], WIDTH, HEIGHT);
 
             vkWaitForFences(device, 1, &fenceCopyImageContent, VK_TRUE, UINT64_MAX);
 
-            float* pixels = new float[WIDTH * HEIGHT * 4];
             void* data;
+
             vkMapMemory(device, renderedImageBufferMemory, 0, WIDTH * HEIGHT * 16, 0, &data);
-            memcpy(pixels, data, WIDTH * HEIGHT * 16);
-            vkUnmapMemory(device, renderedImageBufferMemory);
 
-            std::vector<unsigned char> image(WIDTH * HEIGHT * 4);
-            for (int i = 0; i < WIDTH * HEIGHT * 4; i++)
-            {
-                float col = pixels[i] / pixels[3];
-                
-                col = col < .0031308 ? 12.92 * col : 1.055 * pow(col, 1 / 2.4) - .055;
-
-                image[i] = unsigned char(255.999 * std::clamp(col, 0.f, 1.f));
-            }
-
-            stbi_flip_vertically_on_write(1);
-
-            if (stbi_write_png("render.png", WIDTH, HEIGHT, 4, image.data(), WIDTH * 4))
+            if (stbi_write_png("render.png", WIDTH, HEIGHT, 4, data, WIDTH * 4))
                 std::cout << "Saved render!\n";
             else
                 std::cout << "Something went wrong :(\n";
 
-            delete[] pixels;
+            vkUnmapMemory(device, renderedImageBufferMemory);
 
-            transitionImageLayout(storageImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+            transitionImageLayout(swapChainImages[currentFrame], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         }
 
         updateUniformBuffer(currentFrame);
@@ -1270,7 +1256,7 @@ private:
     {
         for (const auto& availableFormat : availableFormats)
         {
-            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            if (availableFormat.format == VK_FORMAT_R8G8B8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
             {
                 return availableFormat;
             }
@@ -1591,6 +1577,22 @@ private:
 
             sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             destinationStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        }
+        else if (oldLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && newLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+        {
+            barrier.srcAccessMask = VK_ACCESS_NONE_KHR;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+            sourceStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+            destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        }
+        else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        {
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_NONE_KHR;
+
+            sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+            destinationStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
         }
         else
         {
