@@ -12,7 +12,8 @@ struct material
           clearcoat,
           clearcoatRoughness,
           specTrans,
-          IOR, ax, ay;
+          IOR, ax, ay,
+          opacity;
 };
 
 struct hitRecord
@@ -23,27 +24,22 @@ struct hitRecord
     float eta;
 };
 
-bool hitSphere(vec3 center, float radius, ray r, float tmin, float tmax, inout hitRecord rec)
+bool triIntersect(vec3 v0, vec3 v1, vec3 v2, ray r, float tmin, float tmax, inout hitRecord rec)
 {
-    vec3 oc = r.o - center;
-    float b = dot(oc, r.d);
-    float h = radius * radius - dot2(oc - b * r.d);
+    vec3 v1v0 = v1 - v0;
+    vec3 v2v0 = v2 - v0;
+    vec3 rov0 = r.o - v0;
+    vec3  n = cross( v1v0, v2v0 );
+    vec3  q = cross( rov0, r.d );
+    float d = 1 / dot( r.d, n );
+    float u = d*dot( -q, v2v0 );
+    float v = d*dot(  q, v1v0 );
+    float t = d*dot( -n, rov0 );
 
-    if (h < 0) return false;
+    if(u < 0 || v < 0 || u + v > 1 || t < tmin || t > tmax) return false;
 
-    h = sqrt(h);
-
-	float t1 = -b - h, t2 = -b + h;
-	
-	float t = t1 < tmin ? t2 : t1;
-
-    if (t > tmin && t < tmax)
-
-    {
-        rec.t = t;
-        rec.p = r.o + t * r.d;
-        rec.normal = (rec.p - center) / radius;
-	    return true;
-    }
-    else return false;
+    rec.t = t;
+    rec.p = r.o + t * r.d;
+    rec.normal = normalize(n);
+	return true;
 }

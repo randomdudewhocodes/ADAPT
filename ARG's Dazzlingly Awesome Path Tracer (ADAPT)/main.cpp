@@ -4,6 +4,7 @@
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+using namespace glm;
 
 #include <iostream>
 #include <fstream>
@@ -25,8 +26,16 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_USE_CPP14
+#define TINYGLTF_NO_STB_IMAGE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#include "tiny_gltf.h"
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 450;
+
+const std::string GLTF_PATH = "box.glb";
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -87,8 +96,8 @@ struct SwapChainSupportDetails
 
 struct Vertex
 {
-    glm::vec2 pos;
-    glm::vec2 texCoord;
+    vec2 pos;
+    vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription()
     {
@@ -118,9 +127,42 @@ struct Vertex
     }
 };
 
+struct triangle
+{
+    struct vertex
+    {
+        vec3 position;
+        vec3 normal;
+        vec2 texCoord;
+    };
+
+    vertex v0, v1, v2;
+    int materialIndex;  // Link to material
+};
+std::vector<triangle> triangles;
+
+struct material
+{
+    vec3 baseColor, emission;
+    
+    float anisotropic,
+          metallic,
+          roughness,
+          subsurface,
+          specularTint,
+          sheen,
+          sheenTint,
+          clearcoat,
+          clearcoatRoughness,
+          specTrans,
+          IOR, ax, ay,
+          opacity;
+};
+std::vector<material> materials;
+
 struct UniformBufferObject
 {
-    glm::ivec2 resolution = glm::ivec2(WIDTH, HEIGHT);
+    ivec2 resolution = ivec2(WIDTH, HEIGHT);
 };
 
 const std::vector<Vertex> vertices = {
@@ -187,6 +229,12 @@ private:
     VkBuffer renderedImageBuffer;
     VkDeviceMemory renderedImageBufferMemory;
 
+    VkBuffer triangleBuffer;
+    VkDeviceMemory triangleBufferMemory;
+
+    VkBuffer materialBuffer;
+    VkDeviceMemory materialBufferMemory;
+
     std::vector<VkBuffer> uniformBuffers;
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped;
@@ -246,6 +294,11 @@ private:
 
         createVertexBuffer();
         createIndexBuffer();
+
+        loadModel();
+        createTriangleBuffer();
+        createMaterialBuffer();
+
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -311,6 +364,12 @@ private:
 
         vkDestroyBuffer(device, renderedImageBuffer, nullptr);
         vkFreeMemory(device, renderedImageBufferMemory, nullptr);
+
+        vkDestroyBuffer(device, triangleBuffer, nullptr);
+        vkFreeMemory(device, triangleBufferMemory, nullptr);
+
+        vkDestroyBuffer(device, materialBuffer, nullptr);
+        vkFreeMemory(device, materialBufferMemory, nullptr);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -664,7 +723,21 @@ private:
         imageLayoutBinding.descriptorCount = 1;
         imageLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT; // Used in both shaders
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = { uboLayoutBinding, imageLayoutBinding };
+        VkDescriptorSetLayoutBinding triangleLayoutBinding = {};
+        triangleLayoutBinding.binding = 2;
+        triangleLayoutBinding.descriptorCount = 1;
+        triangleLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        triangleLayoutBinding.pImmutableSamplers = nullptr;
+        triangleLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        VkDescriptorSetLayoutBinding materialLayoutBinding = {};
+        materialLayoutBinding.binding = 3;
+        materialLayoutBinding.descriptorCount = 1;
+        materialLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        materialLayoutBinding.pImmutableSamplers = nullptr;
+        materialLayoutBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        std::array<VkDescriptorSetLayoutBinding, 4> bindings = { uboLayoutBinding, imageLayoutBinding, triangleLayoutBinding, materialLayoutBinding };
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -924,7 +997,8 @@ private:
             throw std::runtime_error("failed to allocate descriptor sets!");
         }
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
             VkDescriptorBufferInfo bufferInfo{};
             bufferInfo.buffer = uniformBuffers[i];
             bufferInfo.offset = 0;
@@ -935,7 +1009,17 @@ private:
             imageInfo.imageView = storageImageView;
             imageInfo.sampler = storageSampler;
 
-            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+            VkDescriptorBufferInfo triangleInfo{};
+            triangleInfo.buffer = triangleBuffer;
+            triangleInfo.offset = 0;
+            triangleInfo.range = sizeof(triangle) * triangles.size();
+
+            VkDescriptorBufferInfo materialInfo{};
+            materialInfo.buffer = materialBuffer;
+            materialInfo.offset = 0;
+            materialInfo.range = sizeof(material) * materials.size();
+
+            std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             descriptorWrites[0].dstSet = descriptorSets[i];
@@ -952,6 +1036,22 @@ private:
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             descriptorWrites[1].descriptorCount = 1;
             descriptorWrites[1].pImageInfo = &imageInfo;
+
+            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstSet = descriptorSets[i];
+            descriptorWrites[2].dstBinding = 2;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pBufferInfo = &triangleInfo;
+
+            descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[3].dstSet = descriptorSets[i];
+            descriptorWrites[3].dstBinding = 3;
+            descriptorWrites[3].dstArrayElement = 0;
+            descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            descriptorWrites[3].descriptorCount = 1;
+            descriptorWrites[3].pBufferInfo = &materialInfo;
 
             vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
         }
@@ -1772,6 +1872,217 @@ private:
         }
 
         vkDestroyShaderModule(device, computeShaderModule, nullptr);
+    }
+
+    void loadModel() {
+        tinygltf::Model model;
+        tinygltf::TinyGLTF loader;
+        std::string err, warn;
+
+        bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, GLTF_PATH);
+
+        if (!warn.empty()) std::cout << "Warn: " << warn << std::endl;
+        if (!err.empty()) std::cerr << "Error: " << err << std::endl;
+        if (!ret) throw std::runtime_error("failed to load glTF model!");
+
+        for (const auto& mesh : model.meshes) {
+            for (const auto& primitive : mesh.primitives) {
+                std::vector<triangle::vertex> vertices;
+                std::vector<uint32_t> indices;
+
+                if (primitive.attributes.find("POSITION") != primitive.attributes.end()) {
+                    const auto& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
+                    const auto& posBufferView = model.bufferViews[posAccessor.bufferView];
+                    const float* posData = reinterpret_cast<const float*>(
+                        &model.buffers[posBufferView.buffer].data[posBufferView.byteOffset + posAccessor.byteOffset]);
+
+                    const float* normData = nullptr;
+                    if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
+                        const auto& normAccessor = model.accessors[primitive.attributes.at("NORMAL")];
+                        const auto& normBufferView = model.bufferViews[normAccessor.bufferView];
+                        normData = reinterpret_cast<const float*>(
+                            &model.buffers[normBufferView.buffer].data[normBufferView.byteOffset + normAccessor.byteOffset]);
+                    }
+
+                    const float* texData = nullptr;
+                    if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
+                        const auto& texAccessor = model.accessors[primitive.attributes.at("TEXCOORD_0")];
+                        const auto& texBufferView = model.bufferViews[texAccessor.bufferView];
+                        texData = reinterpret_cast<const float*>(
+                            &model.buffers[texBufferView.buffer].data[texBufferView.byteOffset + texAccessor.byteOffset]);
+                    }
+
+                    for (size_t i = 0; i < posAccessor.count; ++i) {
+                        triangle::vertex vertex;
+                        vertex.position = vec3(posData[i * 3], posData[i * 3 + 1], posData[i * 3 + 2]);
+
+                        vertex.normal = normData ? vec3(normData[i * 3], normData[i * 3 + 1], normData[i * 3 + 2]) : vec3(0);
+                        vertex.texCoord = texData ? vec2(texData[i * 2], texData[i * 2 + 1]) : vec2(0);
+
+                        vertices.push_back(vertex);
+                    }
+                }
+                else {
+                    std::cerr << "Missing POSITION attribute!" << std::endl;
+                    continue;
+                }
+
+                const auto& indexAccessor = model.accessors[primitive.indices];
+                const auto& indexBufferView = model.bufferViews[indexAccessor.bufferView];
+                const auto& indexBuffer = model.buffers[indexBufferView.buffer];
+
+                const size_t indexByteStride = tinygltf::GetComponentSizeInBytes(indexAccessor.componentType);
+                const size_t indexCount = indexAccessor.count;
+                const uint8_t* indexData = &indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset];
+
+                for (size_t i = 0; i < indexCount; i += 3) {
+                    uint32_t idx0, idx1, idx2;
+
+                    if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                        const uint16_t* indices16 = reinterpret_cast<const uint16_t*>(indexData);
+                        idx0 = indices16[i];
+                        idx1 = indices16[i + 1];
+                        idx2 = indices16[i + 2];
+                    }
+                    else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+                        const uint32_t* indices32 = reinterpret_cast<const uint32_t*>(indexData);
+                        idx0 = indices32[i];
+                        idx1 = indices32[i + 1];
+                        idx2 = indices32[i + 2];
+                    }
+                    else {
+                        std::cerr << "Unsupported index format!" << std::endl;
+                        continue;
+                    }
+
+                    if (idx0 >= vertices.size() || idx1 >= vertices.size() || idx2 >= vertices.size()) {
+                        std::cerr << "Invalid index in index buffer: " << idx0 << ", " << idx1 << ", " << idx2 << std::endl;
+                        continue;
+                    }
+
+                    triangle tri;
+                    tri.v0 = vertices[idx0];
+                    tri.v1 = vertices[idx1];
+                    tri.v2 = vertices[idx2];
+                    tri.materialIndex = primitive.material;
+
+                    std::cout << tri.v0.position.x << ", " << tri.v0.position.y << ", " << tri.v0.position.z << ", " << std::endl;
+                    std::cout << tri.v1.position.x << ", " << tri.v1.position.y << ", " << tri.v1.position.z << ", " << std::endl;
+                    std::cout << tri.v2.position.x << ", " << tri.v2.position.y << ", " << tri.v2.position.z << ", " << std::endl;
+
+                    triangles.push_back(tri);
+                }
+            }
+        }
+
+        // Extract materials
+        for (const auto& gltfMat : model.materials) {
+            material mat = {}; // Ensure default initialization
+
+            if (gltfMat.pbrMetallicRoughness.baseColorFactor.size() == 4) {
+                mat.baseColor = glm::vec3(
+                    gltfMat.pbrMetallicRoughness.baseColorFactor[0],
+                    gltfMat.pbrMetallicRoughness.baseColorFactor[1],
+                    gltfMat.pbrMetallicRoughness.baseColorFactor[2]
+                );
+                mat.opacity = gltfMat.pbrMetallicRoughness.baseColorFactor[3];
+            }
+
+            if (gltfMat.emissiveFactor.size() == 3) {
+                mat.emission = glm::vec3(
+                    gltfMat.emissiveFactor[0],
+                    gltfMat.emissiveFactor[1],
+                    gltfMat.emissiveFactor[2]
+                );
+            }
+
+            mat.metallic = gltfMat.pbrMetallicRoughness.metallicFactor;
+            mat.roughness = gltfMat.pbrMetallicRoughness.roughnessFactor;
+
+            if (gltfMat.alphaMode == "BLEND") {
+                mat.opacity = gltfMat.alphaCutoff;
+            }
+
+            if (auto it = gltfMat.extensions.find("KHR_materials_clearcoat"); it != gltfMat.extensions.end()) {
+                const auto& clearcoatExt = it->second.Get<tinygltf::Value::Object>();
+                mat.clearcoat = clearcoatExt.at("clearcoatFactor").GetNumberAsDouble();
+                mat.clearcoatRoughness = clearcoatExt.at("clearcoatRoughnessFactor").GetNumberAsDouble();
+            }
+
+            if (auto it = gltfMat.extensions.find("KHR_materials_ior"); it != gltfMat.extensions.end()) {
+                const auto& iorExt = it->second.Get<tinygltf::Value::Object>();
+                mat.IOR = iorExt.at("ior").GetNumberAsDouble();
+            }
+
+            if (auto it = gltfMat.extensions.find("KHR_materials_sheen"); it != gltfMat.extensions.end()) {
+                const auto& sheenExt = it->second.Get<tinygltf::Value::Object>();
+                mat.sheen = sheenExt.at("sheenColorFactor").Get<tinygltf::Value::Array>()[0].GetNumberAsDouble();
+                mat.sheenTint = sheenExt.at("sheenColorFactor").Get<tinygltf::Value::Array>()[1].GetNumberAsDouble();
+            }
+
+            if (auto it = gltfMat.extensions.find("KHR_materials_transmission"); it != gltfMat.extensions.end()) {
+                const auto& transExt = it->second.Get<tinygltf::Value::Object>();
+                mat.specTrans = transExt.at("transmissionFactor").GetNumberAsDouble();
+            }
+
+            auto it = gltfMat.extensions.find("KHR_materials_anisotropy");
+            if (it != gltfMat.extensions.end()) {
+                const auto& anisotropyExt = it->second.Get<tinygltf::Value::Object>();
+
+                if (anisotropyExt.find("anisotropyStrength") != anisotropyExt.end()) {
+                    mat.anisotropic = static_cast<float>(anisotropyExt.at("anisotropyStrength").GetNumberAsDouble());
+                }
+            }
+
+            materials.push_back(mat);
+        }
+
+        std::cout << "Triangles size: " << triangles.size() << std::endl;
+        std::cout << "Materials size: " << materials.size() << std::endl;
+    }
+
+    void createTriangleBuffer()
+    {
+        VkDeviceSize bufferSize = sizeof(triangle) * triangles.size();
+
+        // Create a staging buffer used to upload data to the gpu
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, triangles.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        // Copy initial particle data to all storage buffers
+        createBuffer(bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, triangleBuffer, triangleBufferMemory);
+        copyBuffer(stagingBuffer, triangleBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+    }
+
+    void createMaterialBuffer()
+    {
+        VkDeviceSize bufferSize = sizeof(material) * materials.size();
+
+        // Create a staging buffer used to upload data to the gpu
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, materials.data(), (size_t)bufferSize);
+        vkUnmapMemory(device, stagingBufferMemory);
+
+        // Copy initial particle data to all storage buffers
+        createBuffer(bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, materialBuffer, materialBufferMemory);
+        copyBuffer(stagingBuffer, materialBuffer, bufferSize);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 };
 
