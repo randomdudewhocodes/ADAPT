@@ -12,7 +12,7 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-add_subdirectory(${CMAKE_SOURCE_DIR}/glfw ${CMAKE_BINARY_DIR}/glfw)
+add_subdirectory(${CMAKE_SOURCE_DIR}/ext/glfw ${CMAKE_BINARY_DIR}/ext/glfw)
 
 # --- Shaders ---
 function(add_shaders TARGET_NAME)
@@ -72,7 +72,8 @@ add_executable(${PROJECT_NAME} src/main.cpp src/adapt.cpp)
 # --- Include paths ---
 target_include_directories(
     ${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/glm
+    ${CMAKE_SOURCE_DIR}/ext/glm
+    ${CMAKE_SOURCE_DIR}/ext/stb
 )
 
 # --- Link libraries ---

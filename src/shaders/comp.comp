@@ -1,0 +1,19 @@
+#version 460
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0, rgba32f) uniform image2D resultImage;
+ivec2 resolution = imageSize(resultImage);
+
+void main()
+{
+    ivec2 I = ivec2(gl_GlobalInvocationID.xy);
+    if (I.x >= resolution.x || I.y >= resolution.y) return;
+    //vec4 O = imageLoad(resultImage, I);
+
+    vec2 uv = I / vec2(resolution);
+
+    vec4 O = vec4(uv, 0, 1);
+
+    imageStore(resultImage, I, O);
+}
