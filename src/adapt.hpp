@@ -119,6 +119,7 @@ private:
     uint32_t currentFrame = 0;
 
     bool framebufferResized = false;
+    bool savedImage = false;
 
     void initWindow();
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);

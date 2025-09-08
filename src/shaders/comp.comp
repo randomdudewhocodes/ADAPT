@@ -9,6 +9,7 @@ void main()
 {
     ivec2 I = ivec2(gl_GlobalInvocationID.xy);
     if (I.x >= resolution.x || I.y >= resolution.y) return;
+
     //vec4 O = imageLoad(resultImage, I);
 
     vec2 uv = I / vec2(resolution);

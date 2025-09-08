@@ -100,6 +100,11 @@ void ADAPT::cleanupSwapChain()
 
 void ADAPT::cleanup()
 {
+    // Ensure device is idle (safe to call even if mainLoop also waited)
+    if (device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(device);
+    }
+
     cleanupSwapChain();
 
     vkDestroySampler(device, resultSampler, nullptr);
@@ -111,12 +116,12 @@ void ADAPT::cleanup()
     vkDestroyBuffer(device, resultImageBuffer, nullptr);
     vkFreeMemory(device, resultImageBufferMemory, nullptr);
 
-    for (auto sem : renderFinishedSemaphores)
-        vkDestroySemaphore(device, sem, nullptr);
+    for (size_t i = 0; i < renderFinishedSemaphores.size(); i++)
+        vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
 
     for (size_t i = 0; i < imageAvailableSemaphores.size(); i++)
         vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
-    
+
     for (size_t i = 0; i < inFlightFences.size(); i++)
         vkDestroyFence(device, inFlightFences[i], nullptr);
 
@@ -132,6 +137,11 @@ void ADAPT::cleanup()
         vkDestroyDescriptorPool(device, descriptorPool, nullptr);
     if (descriptorSetLayout != VK_NULL_HANDLE)
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+
+    if (device != VK_NULL_HANDLE) {
+        vkDestroyDevice(device, nullptr);
+        device = VK_NULL_HANDLE;
+    }
 
     if (enableValidationLayers)
         DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
@@ -1047,6 +1057,31 @@ void ADAPT::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageInd
     uint32_t groupsX = (imageWidth - 1) / localX + 1;
     uint32_t groupsY = (imageHeight - 1) / localY + 1;
     vkCmdDispatch(commandBuffer, groupsX, groupsY, 1);
+
+    VkImageMemoryBarrier compToFragBarrier{};
+    compToFragBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    compToFragBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    compToFragBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    compToFragBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    compToFragBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    compToFragBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    compToFragBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    compToFragBarrier.image = resultImage;
+    compToFragBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    compToFragBarrier.subresourceRange.baseMipLevel = 0;
+    compToFragBarrier.subresourceRange.levelCount = 1;
+    compToFragBarrier.subresourceRange.baseArrayLayer = 0;
+    compToFragBarrier.subresourceRange.layerCount = 1;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &compToFragBarrier
+    );
     
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1124,7 +1159,6 @@ void ADAPT::createSyncObjects()
 void ADAPT::drawFrame()
 {
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-    vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
@@ -1139,8 +1173,10 @@ void ADAPT::drawFrame()
 
     if (imagesInFlight[imageIndex] != VK_NULL_HANDLE)
         vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
-
+    
     imagesInFlight[imageIndex] = inFlightFences[currentFrame];
+
+    vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
     vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
@@ -1148,8 +1184,8 @@ void ADAPT::drawFrame()
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
-    VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
+    VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
     submitInfo.pWaitDstStageMask = waitStages;
@@ -1157,9 +1193,9 @@ void ADAPT::drawFrame()
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 
-    VkSemaphore signalSem = renderFinishedSemaphores[imageIndex];
+    VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[imageIndex] };
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &signalSem;
+    submitInfo.pSignalSemaphores = signalSemaphores;
 
     if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS)
         throw std::runtime_error("failed to submit draw command buffer!");
@@ -1168,45 +1204,15 @@ void ADAPT::drawFrame()
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &signalSem;
+    presentInfo.pWaitSemaphores = signalSemaphores;
 
-    VkSwapchainKHR swapChains[] = {swapChain};
+    VkSwapchainKHR swapChains[] = { swapChain };
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapChains;
 
     presentInfo.pImageIndices = &imageIndex;
 
-    VkResult presentRes = vkQueuePresentKHR(presentQueue, &presentInfo);
-    if (presentRes == VK_ERROR_OUT_OF_DATE_KHR || presentRes == VK_SUBOPTIMAL_KHR) {
-        // recreateSwapChain(); // if implemented
-    } else if (presentRes != VK_SUCCESS) {
-        throw std::runtime_error("failed to present swap chain image!");
-    }
-
-    if (glfwGetKey(this->window, GLFW_KEY_S) == GLFW_PRESS)
-    {
-        glfwWaitEventsTimeout(0.1);
-
-        transitionImageLayout(swapChainImages[imageIndex],
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-        copyImageToBuffer(resultImageBuffer, swapChainImages[imageIndex], WIDTH, HEIGHT);
-
-        void* data;
-        vkMapMemory(device, resultImageBufferMemory, 0, WIDTH * HEIGHT * 16, 0, &data);
-
-        if (stbi_write_png("src/render.png", WIDTH, HEIGHT, 4, data, WIDTH * 4))
-            std::cout << "Saved render!\n";
-        else
-            std::cout << "Something went wrong :(\n";
-
-        vkUnmapMemory(device, resultImageBufferMemory);
-
-        transitionImageLayout(swapChainImages[imageIndex],
-                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    }
+    result = vkQueuePresentKHR(presentQueue, &presentInfo);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized)
     {
@@ -1215,6 +1221,50 @@ void ADAPT::drawFrame()
     }
     else if (result != VK_SUCCESS)
         throw std::runtime_error("failed to present swap chain image!");
+    
+    if (glfwGetKey(this->window, GLFW_KEY_S) == GLFW_PRESS)
+    {
+        if(!savedImage)
+        {
+            transitionImageLayout(resultImage,
+                                VK_IMAGE_LAYOUT_GENERAL,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+            copyImageToBuffer(resultImageBuffer, resultImage, WIDTH, HEIGHT);
+
+            void* data;
+            vkMapMemory(device, resultImageBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
+
+            VkMappedMemoryRange mappedRange{};
+            mappedRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+            mappedRange.memory = resultImageBufferMemory;
+            mappedRange.offset = 0;
+            mappedRange.size = VK_WHOLE_SIZE;
+            vkInvalidateMappedMemoryRanges(device, 1, &mappedRange);
+
+            float* pixels = static_cast<float*>(data);
+
+            std::vector<unsigned char> img(WIDTH * HEIGHT * 4);
+            for (size_t i = 0; i < 4 * WIDTH * HEIGHT; ++i)
+                img[i] = static_cast<unsigned char>(pixels[i] * 255.0f + 0.5f);
+            
+            stbi_flip_vertically_on_write(1);
+
+            if (stbi_write_png("src/render.png", WIDTH, HEIGHT, 4, img.data(), WIDTH * 4))
+                std::cout << "Saved render!\n";
+            else
+                std::cout << "Something went wrong :(\n";
+
+            vkUnmapMemory(device, resultImageBufferMemory);
+
+            transitionImageLayout(resultImage,
+                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                VK_IMAGE_LAYOUT_GENERAL);
+            
+            savedImage = true;
+        }
+    }
+    else savedImage = false;
 
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
