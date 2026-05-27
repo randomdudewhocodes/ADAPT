@@ -3,6 +3,10 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_vulkan.h"
+
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -110,6 +114,8 @@ private:
     VkDescriptorPool descriptorPool;
     std::vector<VkDescriptorSet> descriptorSets;
 
+    VkDescriptorPool imguiDescriptorPool;
+
     std::vector<VkCommandBuffer> commandBuffers;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
@@ -125,6 +131,7 @@ private:
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
     void initVulkan();
     void mainLoop();
+    void cleanupImGui();
     void cleanupSwapChain();
     void cleanup();
 
@@ -164,6 +171,8 @@ private:
     void createCommandBuffers();
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
     void createSyncObjects();
+    void initImGui();
+    void ImGUIScene();
     void drawFrame();
 
     VkShaderModule createShaderModule(const std::vector<char>& code);

@@ -74,6 +74,7 @@ void ADAPT::initVulkan()
     createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
+    initImGui();
 }
 
 void ADAPT::mainLoop()
@@ -85,6 +86,17 @@ void ADAPT::mainLoop()
     }
 
     vkDeviceWaitIdle(device);
+}
+
+void ADAPT::cleanupImGui()
+{
+    vkDeviceWaitIdle(device);
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    if (imguiDescriptorPool != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(device, imguiDescriptorPool, nullptr);
 }
 
 void ADAPT::cleanupSwapChain()
@@ -100,10 +112,10 @@ void ADAPT::cleanupSwapChain()
 
 void ADAPT::cleanup()
 {
-    // Ensure device is idle (safe to call even if mainLoop also waited)
-    if (device != VK_NULL_HANDLE) {
+    if (device != VK_NULL_HANDLE)
         vkDeviceWaitIdle(device);
-    }
+    
+    cleanupImGui();
 
     cleanupSwapChain();
 
@@ -138,7 +150,8 @@ void ADAPT::cleanup()
     if (descriptorSetLayout != VK_NULL_HANDLE)
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-    if (device != VK_NULL_HANDLE) {
+    if (device != VK_NULL_HANDLE)
+    {
         vkDestroyDevice(device, nullptr);
         device = VK_NULL_HANDLE;
     }
@@ -1120,6 +1133,8 @@ void ADAPT::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageInd
 
         vkCmdDraw(commandBuffer, 6, 1, 0, 0);
 
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+
     vkCmdEndRenderPass(commandBuffer);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS)
@@ -1156,6 +1171,76 @@ void ADAPT::createSyncObjects()
     }
 }
 
+void ADAPT::initImGui()
+{
+    VkDescriptorPoolSize poolSizes[] =
+    {
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+    };
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    poolInfo.maxSets = 1000 * (uint32_t) (sizeof(poolSizes)/sizeof(poolSizes[0]));
+    poolInfo.poolSizeCount = static_cast<uint32_t>(sizeof(poolSizes)/sizeof(poolSizes[0]));
+    poolInfo.pPoolSizes = poolSizes;
+
+    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &imguiDescriptorPool) != VK_SUCCESS)
+        throw std::runtime_error("failed to create imgui descriptor pool!");
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui_ImplGlfw_InitForVulkan(window, true);
+
+    ImGui_ImplVulkan_InitInfo init_info = {};
+    init_info.Instance = instance;
+    init_info.PhysicalDevice = physicalDevice;
+    init_info.Device = device;
+    init_info.QueueFamily = findQueueFamilies(physicalDevice).graphicsFamily.value();
+    init_info.Queue = graphicsQueue;
+    init_info.PipelineCache = VK_NULL_HANDLE;
+    init_info.DescriptorPool = imguiDescriptorPool;
+    init_info.RenderPass = renderPass;
+    init_info.Subpass = 0;
+    init_info.MinImageCount = static_cast<int>(swapChainImages.size());
+    init_info.ImageCount = static_cast<int>(swapChainImages.size());
+    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator = nullptr;
+    init_info.CheckVkResultFn = nullptr;
+
+    ImGui_ImplVulkan_Init(&init_info);
+
+    VkCommandBuffer cmd = beginSingleTimeCommands();
+    endSingleTimeCommands(cmd);
+}
+
+float linearToSRGB(float x)
+{
+    x = std::min(std::max(x, 0.0f), 1.0f);
+    return x <= 0.0031308f ? 12.92f * x : 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
+}
+
+void ADAPT::ImGUIScene()
+{
+    ImGui::Begin("debug");
+    ImGui::Text("fps: %.1f", ImGui::GetIO().Framerate);
+    ImGui::Text("frame %u", currentFrame);
+    ImGui::End();
+}
+
 void ADAPT::drawFrame()
 {
     vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
@@ -1177,6 +1262,12 @@ void ADAPT::drawFrame()
     imagesInFlight[imageIndex] = inFlightFences[currentFrame];
 
     vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    ImGUIScene();
+    ImGui::Render();
 
     vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
     recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
@@ -1245,8 +1336,11 @@ void ADAPT::drawFrame()
             float* pixels = static_cast<float*>(data);
 
             std::vector<unsigned char> img(WIDTH * HEIGHT * 4);
-            for (size_t i = 0; i < 4 * WIDTH * HEIGHT; ++i)
-                img[i] = static_cast<unsigned char>(pixels[i] * 255.0f + 0.5f);
+            for (size_t i = 0; i < 4 * WIDTH * HEIGHT; i++)
+            {
+                if (i % 4 < 3) pixels[i] = linearToSRGB(pixels[i]);
+                img[i] = static_cast<unsigned char>(std::min(std::max(pixels[i], 0.0f), 1.0f) * 255.0f + 0.5f);
+            }
             
             stbi_flip_vertically_on_write(1);
 

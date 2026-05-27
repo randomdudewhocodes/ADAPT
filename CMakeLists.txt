@@ -14,6 +14,21 @@ set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_SOURCE_DIR}/ext/glfw ${CMAKE_BINARY_DIR}/ext/glfw)
 
+# --- ImGui ---
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/ext/imgui)
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+
+add_library(imgui STATIC ${IMGUI_SOURCES})
+target_include_directories(imgui PUBLIC ${IMGUI_DIR} ${IMGUI_DIR}/backends)
+target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
+
 # --- Shaders ---
 function(add_shaders TARGET_NAME)
     set(SHADER_SOURCE_FILES ${ARGN})
@@ -71,10 +86,12 @@ add_executable(${PROJECT_NAME} src/main.cpp src/adapt.cpp)
 
 # --- Include paths ---
 target_include_directories(
-    ${PROJECT_NAME} PRIVATE ${Vulkan_INCLUDE_DIRS}
+    ${PROJECT_NAME} PRIVATE
+    ${Vulkan_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/ext/glm
     ${CMAKE_SOURCE_DIR}/ext/stb
+    ${IMGUI_DIR}
 )
 
 # --- Link libraries ---
-target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan glfw)
+target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan glfw imgui)
