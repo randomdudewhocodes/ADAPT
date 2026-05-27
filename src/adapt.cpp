@@ -1,8 +1,7 @@
 #include "adapt.hpp"
 
-#define __STDC_LIB_EXT1__
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#include "../ext/stb_image_write.h"
 
 VkResult CreateDebugUtilsMessengerEXT(
     VkInstance instance,
@@ -293,13 +292,7 @@ void ADAPT::createLogicalDevice()
     createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
     createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 
-    if (enableValidationLayers)
-    {
-        createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-        createInfo.ppEnabledLayerNames = validationLayers.data();
-    }
-    else
-        createInfo.enabledLayerCount = 0;
+    createInfo.enabledLayerCount = 0;
 
     if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &device) != VK_SUCCESS)
         throw std::runtime_error("failed to create logical device!");
@@ -468,8 +461,8 @@ void ADAPT::createDescriptorSetLayout()
 
 void ADAPT::createGraphicsPipeline()
 {
-    auto vertShaderCode = readFile("src/compiled shaders/vert.spv");
-    auto fragShaderCode = readFile("src/compiled shaders/frag.spv");
+    auto vertShaderCode = readFile("src/compiled_shaders/vert.spv");
+    auto fragShaderCode = readFile("src/compiled_shaders/frag.spv");
 
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -576,7 +569,7 @@ void ADAPT::createGraphicsPipeline()
 
 void ADAPT::createComputePipeline()
 {
-    auto computeShaderCode = readFile("src/compiled shaders/comp.spv");
+    auto computeShaderCode = readFile("src/compiled_shaders/comp.spv");
 
     VkShaderModule computeShaderModule = createShaderModule(computeShaderCode);
 
@@ -1213,11 +1206,11 @@ void ADAPT::initImGui()
     init_info.Queue = graphicsQueue;
     init_info.PipelineCache = VK_NULL_HANDLE;
     init_info.DescriptorPool = imguiDescriptorPool;
-    init_info.RenderPass = renderPass;
-    init_info.Subpass = 0;
+    init_info.PipelineInfoMain.RenderPass = renderPass;
+    init_info.PipelineInfoMain.Subpass = 0;
     init_info.MinImageCount = static_cast<int>(swapChainImages.size());
     init_info.ImageCount = static_cast<int>(swapChainImages.size());
-    init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.Allocator = nullptr;
     init_info.CheckVkResultFn = nullptr;
 

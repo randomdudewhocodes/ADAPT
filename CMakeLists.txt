@@ -52,7 +52,7 @@ function(add_shaders TARGET_NAME)
 
     set(SHADER_COMMANDS)
     set(SHADER_PRODUCTS)
-    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/src/compiled shaders")
+    set(SHADER_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/src/compiled_shaders")
 
     foreach(SHADER_SOURCE IN LISTS SHADER_SOURCE_FILES)
         get_filename_component(SHADER_SOURCE_ABS "${SHADER_SOURCE}" ABSOLUTE)
